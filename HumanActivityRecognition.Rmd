@@ -1,0 +1,91 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Sean Wheatley"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(plyr)
+library(randomForest)
+library(gbm)
+```
+
+#Introduction
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. The goal of this analysis will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which an exercise was done. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways, indicated by the "classe" variable in the data.
+
+#Getting the Data
+To begin, the raw data is downloaded from the URL provided. The initial training set will be used as the population data and is subsetted into training and test data sets at a 60/40 split. Furthermore, the seed is set at the outset for reproducibility.
+```{r read}
+#load caret, read in data, set seed
+train_raw = read.csv(url("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"),na.strings = c("NA", "", "#DIV/0!"))
+set.seed(513)
+
+#partition raw training data into train/test set
+inTrain = createDataPartition(y = train_raw$classe, p = .6, list = F)
+train = train_raw[inTrain,]
+test = train_raw[-inTrain,]
+
+#get dimensions
+dim(train)
+dim(test)
+```
+We can see that our training data set has `r nrow(train)` observations, while the test data has `r nrow(test)`. Each data set has `r ncol(train)` variables.
+
+#Data Processing
+To reduce the size of the data, we remove variables that will not be useful, have little to no variance, or have a high proportion of NA values. Any processing that is done on the training data set is analagously performed on the test set.
+
+First, we remove the frst 7 columns because they will not be useful for predictive modeling. They will not be useful for the model. Second, we will identify and remove variabls with near zero variance.  There still remains a number of variables with many NA values - each remaining column has either 0 NA values, or about 98% filled with NAs.  Therefore, the final processing step is to remove those variables with a high proportion of NA values.
+```{r process}
+#remove first 5 columns
+train = train[,-(1:7)]
+test = test[,-(1:7)]
+
+#identify predictors with near zero variance, remove from train and test sets
+nzv = nearZeroVar(train)
+train = train[,-nzv]
+test = test[,-nzv]
+
+#calculate % of na values in each column and remove cols with high proportion
+pct_na = numeric()
+for(i in 1:ncol(train)){
+    pct_na[i] = sum(is.na(train[,i]))/nrow(train)
+}
+
+#get counts of percentages --> either no NAs or ~98% NA
+count(round(pct_na,2))
+rm_na = which(pct_na > 0.9)
+
+train = train[,-rm_na]
+test = test[,-rm_na]
+
+dim(train)
+dim(test)
+```
+
+Now, each of our data sets contain `r ncol(train)` variables. Next we will proceed with modeling using the existing data set. 
+
+#Modeling
+We will begin our modeling process by training a Random Forest using the processed data.
+```{r forest}
+#random forest model
+#random forest model
+mod_rf = randomForest(classe~., data = train)
+pred_rf = predict(mod_rf, test)
+confusionMatrix(pred_rf, test$classe)
+```
+When evaluating the Random Forest model against the test data, 99.46% accuracy is observed. This indicates an approximate 0.54% out-of-sample error rate.
+
+As an alternative to a Random Forest, we will next train a model using Gradient Boosting.  K-fold cross valdiation with 5 folds is used to minimize runtime.
+```{r boost}
+#generalized boosting model
+mod_gbm = train(classe~., data = train, method = "gbm", verbose = F,
+                trControl = trainControl(method = "cv", number = 5))
+pred_gbm = predict(mod_gbm, test)
+confusionMatrix(pred_gbm, test$classe)
+```
+
+#Conclusion
+The accuracy of the Gradient Boosting Regression model is a bit worse then the Random Forest, achieving 96.23% accuracy when compared against the test data. Since we would expect a higher out-of-sample error rate for the Gradient Boosting model, we disregard this and use the Random Forest. 
+
